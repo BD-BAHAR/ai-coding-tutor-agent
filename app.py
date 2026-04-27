@@ -10,236 +10,174 @@ MODEL_NAME = "meta-llama/Meta-Llama-3-8B-Instruct"
 
 client = InferenceClient(token=HF_TOKEN)
 
+# 🔥 NEW STAGES
 STAGES = [
-    "Task Understanding",
-    "Input–Output Mapping",
-    "Logic Planning",
-    "Guided Coding",
-    "Testing & Improvement",
+    "Problem Interpretation",
+    "Input and Output Analysis",
+    "Solution Strategy",
+    "Code Construction",
+    "Testing and Debugging",
     "Learning Reflection"
 ]
 
-SYSTEM_PROMPT = """
-You are an interactive AI programming tutor.
-
-Your job is to guide the student through one stage at a time.
-
-Stages:
-1. Task Understanding
-2. Input–Output Mapping
-3. Logic Planning
-4. Guided Coding
-5. Testing & Improvement
-6. Learning Reflection
-
-STRICT RULES:
-- Ask only ONE question at a time.
-- Do NOT give full code immediately.
-- Do NOT explain all stages at once.
-- Keep responses short and interactive.
-- Give feedback on the student's answer.
-- Move to the next stage only when the student gives a reasonable response.
-- If the student asks for direct code, first encourage them to try.
-- If they are stuck, give a small hint.
-"""
-
+# 🔥 STATE
 student_data = {
-    "student_name": "",
     "problem": "",
     "stage": 0,
-    "responses": {stage: "" for stage in STAGES},
-    "feedback": {stage: "" for stage in STAGES}
+    "responses": {s: "" for s in STAGES},
+    "feedback": {s: "" for s in STAGES},
+    "scores": {s: 0 for s in STAGES}
 }
 
-def detect_feedback(stage, student_message):
+# 🔥 PROMPTS
+def get_feedback_and_score(stage, response):
     prompt = f"""
-You are evaluating a beginner programming student's response.
+Evaluate a student's answer.
 
-Current stage: {stage}
-Student response: {student_message}
+Stage: {stage}
+Answer: {response}
 
-Give very short feedback in 1-2 sentences.
-Do not give full solution.
+Return:
+Feedback (1-2 lines)
+Score (1-5)
+
+Format:
+Feedback: ...
+Score: X
 """
-
     try:
-        response = client.chat.completions.create(
+        res = client.chat.completions.create(
             model=MODEL_NAME,
-            messages=[
-                {"role": "system", "content": "You are a concise programming tutor."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=120,
-            temperature=0.5,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=150
         )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        return f"Feedback unavailable: {str(e)}"
+        text = res.choices[0].message.content
 
-def tutor_reply(message, history):
-    if history is None:
-        history = []
+        score = 3
+        for i in range(1,6):
+            if f"{i}" in text:
+                score = i
 
-    if not message.strip():
-        return history, ""
+        return text, score
+    except:
+        return "Feedback unavailable", 3
 
-    current_stage = STAGES[student_data["stage"]]
 
-    if student_data["problem"] == "":
-        student_data["problem"] = message
-        reply = (
-            f"Great. We will solve this step by step.\n\n"
-            f"Stage 1: {STAGES[0]}\n"
-            f"Can you explain the problem in your own words?"
-        )
-        history.append({"role": "user", "content": message})
-        history.append({"role": "assistant", "content": reply})
-        return history, ""
+def get_hint(stage):
+    prompt = f"Give a short hint for stage: {stage}"
+    res = client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=80
+    )
+    return res.choices[0].message.content
 
-    feedback = detect_feedback(current_stage, message)
-    student_data["responses"][current_stage] += message + "\n"
-    student_data["feedback"][current_stage] = feedback
 
-    if student_data["stage"] < len(STAGES) - 1:
+# 🔥 MAIN FUNCTIONS
+
+def submit_problem(problem, chat):
+    student_data["problem"] = problem
+    student_data["stage"] = 0
+    return chat + [
+        {"role": "assistant",
+         "content": f"Stage 1: {STAGES[0]}\nExplain the problem in your own words."}
+    ]
+
+
+def check_answer(answer, chat):
+    stage = STAGES[student_data["stage"]]
+
+    feedback, score = get_feedback_and_score(stage, answer)
+
+    student_data["responses"][stage] = answer
+    student_data["feedback"][stage] = feedback
+    student_data["scores"][stage] = score
+
+    return chat + [
+        {"role": "assistant",
+         "content": f"{feedback}\nScore: {score}/5"}
+    ]
+
+
+def next_stage(chat):
+    if student_data["stage"] < len(STAGES)-1:
         student_data["stage"] += 1
-        next_stage = STAGES[student_data["stage"]]
-
-        next_question_map = {
-            "Input–Output Mapping": "What are the inputs and expected output for this problem?",
-            "Logic Planning": "What steps or logic will solve this problem before writing code?",
-            "Guided Coding": "Now try writing a small part of the code. What would you write first?",
-            "Testing & Improvement": "How will you test your program? Give one valid and one invalid/test case.",
-            "Learning Reflection": "What did you learn from solving this problem?"
-        }
-
-        reply = (
-            f"{feedback}\n\n"
-            f"Now move to Stage {student_data['stage'] + 1}: {next_stage}\n"
-            f"{next_question_map[next_stage]}"
-        )
+        stage = STAGES[student_data["stage"]]
+        return chat + [
+            {"role": "assistant",
+             "content": f"Stage {student_data['stage']+1}: {stage}\nContinue..."}
+        ]
     else:
-        reply = (
-            f"{feedback}\n\n"
-            "Excellent. You completed all stages. Now you can generate your PDF report."
-        )
+        return chat + [{"role": "assistant", "content": "All stages completed. Generate report."}]
 
-    history.append({"role": "user", "content": message})
-    history.append({"role": "assistant", "content": reply})
-    return history, ""
 
-def generate_pdf(student_name):
-    if not student_name.strip():
-        student_name = "Student"
+def hint(chat):
+    stage = STAGES[student_data["stage"]]
+    h = get_hint(stage)
+    return chat + [{"role": "assistant", "content": f"Hint: {h}"}]
 
-    filename = f"{student_name.replace(' ', '_')}_CS_Learning_Companion_Report.pdf"
-    filepath = f"/tmp/{filename}"
 
-    c = canvas.Canvas(filepath, pagesize=letter)
-    width, height = letter
-    y = height - 50
+# 🔥 PDF
+def generate_pdf(name):
+    filename = f"/tmp/{name}_report.pdf"
+    c = canvas.Canvas(filename, pagesize=letter)
 
-    def write_line(text, size=10, bold=False):
-        nonlocal y
-        if y < 70:
-            c.showPage()
-            y = height - 50
+    y = 750
 
-        font = "Helvetica-Bold" if bold else "Helvetica"
-        c.setFont(font, size)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, y, "AI Programming Learning Companion Report")
+    y -= 30
 
-        max_chars = 90
-        lines = []
-        while len(text) > max_chars:
-            split_at = text.rfind(" ", 0, max_chars)
-            if split_at == -1:
-                split_at = max_chars
-            lines.append(text[:split_at])
-            text = text[split_at:].strip()
-        lines.append(text)
+    c.setFont("Helvetica", 10)
+    c.drawString(50, y, f"Student: {name}")
+    y -= 20
+    c.drawString(50, y, f"Date: {datetime.now().strftime('%Y-%m-%d')}")
+    y -= 30
 
-        for line in lines:
-            c.drawString(50, y, line)
-            y -= 15
+    for s in STAGES:
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(50, y, s)
+        y -= 15
 
-    write_line("CS Learning Companion Report", 16, True)
-    write_line(f"Student Name: {student_name}", 11)
-    write_line(f"Date: {datetime.now().strftime('%Y-%m-%d')}", 11)
-    write_line(f"Programming Problem: {student_data['problem']}", 11)
-    y -= 10
+        c.setFont("Helvetica", 9)
+        c.drawString(50, y, f"Response: {student_data['responses'][s]}")
+        y -= 15
+        c.drawString(50, y, f"Feedback: {student_data['feedback'][s]}")
+        y -= 15
+        c.drawString(50, y, f"Score: {student_data['scores'][s]}/5")
+        y -= 25
 
-    for i, stage in enumerate(STAGES, start=1):
-        write_line(f"Stage {i}: {stage}", 13, True)
-        write_line("Student Response:", 11, True)
-        write_line(student_data["responses"][stage] or "Not completed")
-        write_line("Assistant Feedback:", 11, True)
-        write_line(student_data["feedback"][stage] or "No feedback recorded")
-        y -= 8
+    avg = sum(student_data["scores"].values()) / len(STAGES)
 
-    write_line("Final Summary", 14, True)
-    completed = sum(1 for stage in STAGES if student_data["responses"][stage].strip())
-
-    write_line(f"Completed Stages: {completed} out of {len(STAGES)}")
-    write_line("Performance Assessment:", 12, True)
-
-    if completed == len(STAGES):
-        write_line("Problem-Solving Progress: 5 - Excellent structured progress.")
-        write_line("Coding Development: 5 - Completed guided coding and testing stages.")
-        write_line("Learning Reflection: 5 - Completed reflection stage.")
-    elif completed >= 4:
-        write_line("Problem-Solving Progress: 4 - Good progress with minor missing parts.")
-        write_line("Coding Development: 4 - Mostly complete.")
-        write_line("Learning Reflection: 4 - Reflection or testing may need more detail.")
-    else:
-        write_line("Problem-Solving Progress: 3 - Some stages need more work.")
-        write_line("Coding Development: 3 - Continue working through the guided steps.")
-        write_line("Learning Reflection: 3 - More explanation is needed.")
-
-    write_line("Suggestions for Growth:", 12, True)
-    write_line("- Continue explaining the problem before writing code.")
-    write_line("- Practice identifying inputs, outputs, and logic first.")
-    write_line("- Test your program with different cases.")
-    write_line("- Reflect on what errors you faced and how you fixed them.")
-
+    c.drawString(50, y, f"Final Score: {avg:.2f}/5")
     c.save()
-    return filepath
 
-def reset_all():
-    global student_data
-    student_data = {
-        "student_name": "",
-        "problem": "",
-        "stage": 0,
-        "responses": {stage: "" for stage in STAGES},
-        "feedback": {stage: "" for stage in STAGES}
-    }
-    return [], ""
+    return filename
 
+
+# 🔥 UI
 with gr.Blocks() as demo:
-    gr.Markdown("# AI Coding Tutor Agent")
-    gr.Markdown("This tutor guides students step by step and generates a final learning report.")
+    gr.Markdown("# AI Programming Learning Companion")
 
-    student_name = gr.Textbox(
-        label="Student Name",
-        placeholder="Enter student name"
-    )
+    name = gr.Textbox(label="Student Name")
+    problem = gr.Textbox(label="Problem")
 
-    chatbot = gr.Chatbot()
+    chatbot = gr.Chatbot(type="messages")
 
-    msg = gr.Textbox(
-        label="Programming Problem / Response",
-        placeholder="Example: Write a Java program to add two numbers",
-        lines=2
-    )
+    answer = gr.Textbox(label="Your Answer")
 
-    submit = gr.Button("Submit")
-    clear = gr.Button("Clear")
-    pdf_button = gr.Button("Generate PDF Report")
-    pdf_output = gr.File(label="Download Report")
+    btn_submit = gr.Button("Start Problem")
+    btn_check = gr.Button("Check my answer")
+    btn_next = gr.Button("Next step")
+    btn_hint = gr.Button("Give me a hint")
+    btn_report = gr.Button("Generate report")
 
-    submit.click(tutor_reply, [msg, chatbot], [chatbot, msg])
-    msg.submit(tutor_reply, [msg, chatbot], [chatbot, msg])
-    clear.click(reset_all, outputs=[chatbot, msg])
-    pdf_button.click(generate_pdf, inputs=student_name, outputs=pdf_output)
+    file = gr.File()
 
-if __name__ == "__main__":
-    demo.launch()
+    btn_submit.click(submit_problem, [problem, chatbot], chatbot)
+    btn_check.click(check_answer, [answer, chatbot], chatbot)
+    btn_next.click(next_stage, chatbot, chatbot)
+    btn_hint.click(hint, chatbot, chatbot)
+    btn_report.click(generate_pdf, name, file)
+
+demo.launch()
