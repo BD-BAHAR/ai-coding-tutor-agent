@@ -3,10 +3,9 @@ import gradio as gr
 from huggingface_hub import InferenceClient
 
 HF_TOKEN = os.environ.get("HF_TOKEN")
+MODEL_NAME = "meta-llama/Llama-3-8b-Instruct"
 
 client = InferenceClient(token=HF_TOKEN)
-
-MODEL_NAME = "meta-llama/Llama-3-8b-Instruct"   # ✅ very stable
 
 SYSTEM_PROMPT = """
 You are an AI coding tutor for beginner programming students.
@@ -28,11 +27,14 @@ def tutor_agent(message, history):
     if history is None:
         history = []
 
+    if not message.strip():
+        return "", history
+
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    for user, bot in history:
-        messages.append({"role": "user", "content": user})
-        messages.append({"role": "assistant", "content": bot})
+    for user_msg, bot_msg in history:
+        messages.append({"role": "user", "content": user_msg})
+        messages.append({"role": "assistant", "content": bot_msg})
 
     messages.append({"role": "user", "content": message})
 
@@ -57,9 +59,10 @@ with gr.Blocks() as demo:
     gr.Markdown("# AI Coding Tutor Agent")
     gr.Markdown("Enter a programming problem. The tutor will guide you step by step.")
 
-    chatbot = gr.Chatbot()
+    chatbot = gr.Chatbot(type="tuples")
 
     msg = gr.Textbox(
+        label="Your programming question",
         placeholder="Example: Write a Java program to add two numbers",
         lines=2
     )
@@ -67,9 +70,9 @@ with gr.Blocks() as demo:
     submit = gr.Button("Submit")
     clear = gr.Button("Clear")
 
-    submit.click(tutor_agent, [msg, chatbot], [msg, chatbot])
-    msg.submit(tutor_agent, [msg, chatbot], [msg, chatbot])
-    clear.click(lambda: [], None, chatbot)
+    submit.click(tutor_agent, inputs=[msg, chatbot], outputs=[msg, chatbot])
+    msg.submit(tutor_agent, inputs=[msg, chatbot], outputs=[msg, chatbot])
+    clear.click(lambda: [], inputs=None, outputs=chatbot)
 
 if __name__ == "__main__":
     demo.launch()
