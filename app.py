@@ -4,84 +4,99 @@ from huggingface_hub import InferenceClient
 
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
-client = InferenceClient(token=HF_TOKEN)
+MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2"
+
+client = InferenceClient(
+    model=MODEL_NAME,
+    token=HF_TOKEN
+)
 
 SYSTEM_PROMPT = """
 You are an AI coding tutor for beginner programming students.
 
-A student will write a programming question, such as:
-"Write a Java program to add two numbers."
-
-Your job is to guide the student step by step.
+A student will write a programming question.
 Do NOT give the full code immediately.
 
-Follow this teaching flow:
-1. Ask the student to explain the problem in their own words.
-2. Help the student identify input and output.
-3. Guide the student to think about the logic.
-4. Help the student write pseudocode.
-5. Give small code hints only when needed.
-6. If the student submits code, help debug it.
+Guide the student step by step:
+1. Ask what the problem means.
+2. Ask for input and output.
+3. Ask about the logic.
+4. Help with pseudocode.
+5. Give small hints.
+6. Help debug code.
 
-Rules:
-- Do not give full solution first.
-- Ask guiding questions.
-- Give hints instead of direct answers.
-- Keep the language simple.
-- Encourage the student.
+Keep answers short, simple, and supportive.
 """
+
+def build_prompt(user_message, history):
+    prompt = SYSTEM_PROMPT + "\n\n"
+
+    if history:
+        for user, bot in history:
+            prompt += f"Student: {user}\nTutor: {bot}\n"
+
+    prompt += f"Student: {user_message}\nTutor:"
+    return prompt
 
 def tutor_agent(message, history):
     if not message.strip():
-        return ""
+        return "", history
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-
-    if history:
-        for item in history:
-            if isinstance(item, dict):
-                role = item.get("role")
-                content = item.get("content")
-                if role and content:
-                    messages.append({"role": role, "content": content})
-            else:
-                user_msg, bot_msg = item
-                messages.append({"role": "user", "content": user_msg})
-                messages.append({"role": "assistant", "content": bot_msg})
-
-    messages.append({"role": "user", "content": message})
+    prompt = build_prompt(message, history)
 
     try:
-        response = client.chat.completions.create(
-            model="mistralai/Mistral-7B-Instruct-v0.2",
-            messages=messages,
-            max_tokens=500,
+        response = client.text_generation(
+            prompt,
+            max_new_tokens=300,
             temperature=0.7,
+            return_full_text=False
         )
 
-        return response.choices[0].message.content
+        history.append((message, response.strip()))
+        return "", history
 
     except Exception as e:
-        return f"""
-Error connecting to model.
+        error_message = f"""
+Error from Hugging Face model:
+
+{str(e)}
 
 Check:
-- HF_TOKEN is set correctly
-- Space restarted
-
-Error:
-{str(e)}
+1. HF_TOKEN is added in Settings → Variables and secrets
+2. Secret name is exactly HF_TOKEN
+3. Restart the Space
+4. Check Logs
 """
+        history.append((message, error_message))
+        return "", history
 
-demo = gr.ChatInterface(
-    fn=tutor_agent,
-    title="AI Coding Tutor Agent",
-    description="Enter a programming problem. The tutor will guide you step by step instead of giving direct code.",
-    textbox=gr.Textbox(
+with gr.Blocks() as demo:
+    gr.Markdown("# AI Coding Tutor Agent")
+    gr.Markdown("Enter a programming problem. The tutor will guide you step by step instead of giving direct code.")
+
+    chatbot = gr.Chatbot(label="Tutor Chat")
+    msg = gr.Textbox(
+        label="Your programming question",
         placeholder="Example: Write a Java program to add two numbers",
         lines=2
-    ),
-)
+    )
+
+    submit = gr.Button("Submit")
+    clear = gr.Button("Clear")
+
+    submit.click(
+        tutor_agent,
+        inputs=[msg, chatbot],
+        outputs=[msg, chatbot]
+    )
+
+    msg.submit(
+        tutor_agent,
+        inputs=[msg, chatbot],
+        outputs=[msg, chatbot]
+    )
+
+    clear.click(lambda: [], None, chatbot)
 
 if __name__ == "__main__":
     demo.launch()
