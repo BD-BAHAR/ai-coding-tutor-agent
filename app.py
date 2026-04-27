@@ -28,8 +28,9 @@ def tutor_agent(message, history):
         history = []
 
     if not message.strip():
-        return "", history
+        return history, ""
 
+    # Build messages for model
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
     for user_msg, bot_msg in history:
@@ -52,14 +53,14 @@ def tutor_agent(message, history):
         reply = f"ERROR:\n{str(e)}"
 
     history.append((message, reply))
-    return "", history
+    return history, ""
 
 
 with gr.Blocks() as demo:
     gr.Markdown("# AI Coding Tutor Agent")
     gr.Markdown("Enter a programming problem. The tutor will guide you step by step.")
 
-    chatbot = gr.Chatbot(type="tuples")
+    chatbot = gr.Chatbot()  # ✅ NO type argument
 
     msg = gr.Textbox(
         label="Your programming question",
@@ -70,9 +71,23 @@ with gr.Blocks() as demo:
     submit = gr.Button("Submit")
     clear = gr.Button("Clear")
 
-    submit.click(tutor_agent, inputs=[msg, chatbot], outputs=[msg, chatbot])
-    msg.submit(tutor_agent, inputs=[msg, chatbot], outputs=[msg, chatbot])
-    clear.click(lambda: [], inputs=None, outputs=chatbot)
+    submit.click(
+        tutor_agent,
+        inputs=[msg, chatbot],
+        outputs=[chatbot, msg]   # ⚠️ important order
+    )
+
+    msg.submit(
+        tutor_agent,
+        inputs=[msg, chatbot],
+        outputs=[chatbot, msg]
+    )
+
+    clear.click(
+        lambda: [],
+        inputs=None,
+        outputs=chatbot
+    )
 
 if __name__ == "__main__":
     demo.launch()
