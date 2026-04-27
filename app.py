@@ -3,68 +3,63 @@ import gradio as gr
 from huggingface_hub import InferenceClient
 
 HF_TOKEN = os.environ.get("HF_TOKEN")
-MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2"
 
-client = InferenceClient(model=MODEL_NAME, token=HF_TOKEN)
+client = InferenceClient(token=HF_TOKEN)
+
+MODEL_NAME = "meta-llama/Llama-3-8b-Instruct"   # ✅ very stable
 
 SYSTEM_PROMPT = """
 You are an AI coding tutor for beginner programming students.
-Do NOT give the full code immediately.
-Guide the student step by step with questions and hints.
-Keep answers short, simple, and supportive.
+
+Do NOT give full code immediately.
+
+Guide step-by-step:
+1. Ask what the problem means
+2. Ask input/output
+3. Ask logic
+4. Help with pseudocode
+5. Give small hints
+6. Help debug code
+
+Be simple, short, and supportive.
 """
 
-chat_history_text = ""
+def tutor_agent(message, history):
+    if history is None:
+        history = []
 
-def tutor_agent(message):
-    global chat_history_text
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    if not message.strip():
-        return chat_history_text, ""
+    for user, bot in history:
+        messages.append({"role": "user", "content": user})
+        messages.append({"role": "assistant", "content": bot})
 
-    prompt = f"""
-{SYSTEM_PROMPT}
-
-Conversation so far:
-{chat_history_text}
-
-Student: {message}
-Tutor:
-"""
+    messages.append({"role": "user", "content": message})
 
     try:
-        response = client.text_generation(
-            prompt,
-            max_new_tokens=250,
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=messages,
+            max_tokens=400,
             temperature=0.7,
-            return_full_text=False
         )
 
-        chat_history_text += f"\n\nStudent: {message}\n\nTutor: {response.strip()}"
-        return chat_history_text, ""
+        reply = response.choices[0].message.content
 
     except Exception as e:
-        error_text = f"\n\nStudent: {message}\n\nTutor: ERROR: {str(e)}"
-        chat_history_text += error_text
-        return chat_history_text, ""
+        reply = f"ERROR:\n{str(e)}"
 
-def clear_chat():
-    global chat_history_text
-    chat_history_text = ""
-    return ""
+    history.append((message, reply))
+    return "", history
+
 
 with gr.Blocks() as demo:
     gr.Markdown("# AI Coding Tutor Agent")
-    gr.Markdown("Enter a programming problem. The tutor will guide you step by step instead of giving direct code.")
+    gr.Markdown("Enter a programming problem. The tutor will guide you step by step.")
 
-    chatbox = gr.Textbox(
-        label="Tutor Chat",
-        lines=18,
-        interactive=False
-    )
+    chatbot = gr.Chatbot()
 
     msg = gr.Textbox(
-        label="Your programming question",
         placeholder="Example: Write a Java program to add two numbers",
         lines=2
     )
@@ -72,9 +67,9 @@ with gr.Blocks() as demo:
     submit = gr.Button("Submit")
     clear = gr.Button("Clear")
 
-    submit.click(tutor_agent, inputs=msg, outputs=[chatbox, msg])
-    msg.submit(tutor_agent, inputs=msg, outputs=[chatbox, msg])
-    clear.click(clear_chat, outputs=chatbox)
+    submit.click(tutor_agent, [msg, chatbot], [msg, chatbot])
+    msg.submit(tutor_agent, [msg, chatbot], [msg, chatbot])
+    clear.click(lambda: [], None, chatbot)
 
 if __name__ == "__main__":
     demo.launch()
