@@ -14,54 +14,54 @@ Guide the student step by step with questions and hints.
 Keep answers short, simple, and supportive.
 """
 
-def build_prompt(user_message, history):
-    prompt = SYSTEM_PROMPT + "\n\n"
+chat_history_text = ""
 
-    for msg in history:
-        role = msg["role"]
-        content = msg["content"]
-        if role == "user":
-            prompt += f"Student: {content}\n"
-        elif role == "assistant":
-            prompt += f"Tutor: {content}\n"
-
-    prompt += f"Student: {user_message}\nTutor:"
-    return prompt
-
-def tutor_agent(message, history):
-    if history is None:
-        history = []
+def tutor_agent(message):
+    global chat_history_text
 
     if not message.strip():
-        return "", history
+        return chat_history_text, ""
 
-    prompt = build_prompt(message, history)
+    prompt = f"""
+{SYSTEM_PROMPT}
+
+Conversation so far:
+{chat_history_text}
+
+Student: {message}
+Tutor:
+"""
 
     try:
         response = client.text_generation(
             prompt,
-            max_new_tokens=300,
+            max_new_tokens=250,
             temperature=0.7,
             return_full_text=False
         )
 
-        history.append({"role": "user", "content": message})
-        history.append({"role": "assistant", "content": response.strip()})
-        return "", history
+        chat_history_text += f"\n\nStudent: {message}\n\nTutor: {response.strip()}"
+        return chat_history_text, ""
 
     except Exception as e:
-        history.append({"role": "user", "content": message})
-        history.append({
-            "role": "assistant",
-            "content": f"Error from Hugging Face model:\n\n{str(e)}"
-        })
-        return "", history
+        error_text = f"\n\nStudent: {message}\n\nTutor: ERROR: {str(e)}"
+        chat_history_text += error_text
+        return chat_history_text, ""
+
+def clear_chat():
+    global chat_history_text
+    chat_history_text = ""
+    return ""
 
 with gr.Blocks() as demo:
     gr.Markdown("# AI Coding Tutor Agent")
     gr.Markdown("Enter a programming problem. The tutor will guide you step by step instead of giving direct code.")
 
-    chatbot = gr.Chatbot(label="Tutor Chat", type="messages")
+    chatbox = gr.Textbox(
+        label="Tutor Chat",
+        lines=18,
+        interactive=False
+    )
 
     msg = gr.Textbox(
         label="Your programming question",
@@ -72,9 +72,9 @@ with gr.Blocks() as demo:
     submit = gr.Button("Submit")
     clear = gr.Button("Clear")
 
-    submit.click(tutor_agent, inputs=[msg, chatbot], outputs=[msg, chatbot])
-    msg.submit(tutor_agent, inputs=[msg, chatbot], outputs=[msg, chatbot])
-    clear.click(lambda: [], outputs=chatbot)
+    submit.click(tutor_agent, inputs=msg, outputs=[chatbox, msg])
+    msg.submit(tutor_agent, inputs=msg, outputs=[chatbox, msg])
+    clear.click(clear_chat, outputs=chatbox)
 
 if __name__ == "__main__":
     demo.launch()
