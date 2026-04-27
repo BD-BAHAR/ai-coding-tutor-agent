@@ -3,7 +3,7 @@ import gradio as gr
 from huggingface_hub import InferenceClient
 
 HF_TOKEN = os.environ.get("HF_TOKEN")
-MODEL_NAME = "meta-llama/Llama-3-8b-Instruct"
+MODEL_NAME = "meta-llama/Meta-Llama-3-8B-Instruct"
 
 client = InferenceClient(token=HF_TOKEN)
 
